@@ -5,11 +5,69 @@ import (
 	"attendance-app/internal/models"
 	"attendance-app/internal/repository"
 	"encoding/json"
+	"log"
 	"net/http"
+	"os"
 	"regexp"
+	"time"
 
+	"github.com/golang-jwt/jwt"
 	"golang.org/x/crypto/bcrypt"
 )
+
+var jwtSecretKey = []byte(os.Getenv("JWT_SECRET"))
+
+// LoginHandler handles operator login
+func LoginHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		helpers.SetResponse(w, "Invalid request method", nil, http.StatusBadRequest)
+		return
+	}
+
+	var operator models.Operator
+	if err := json.NewDecoder(r.Body).Decode(&operator); err != nil {
+		helpers.SetResponse(w, "Invalid request body", nil, http.StatusBadRequest)
+		return
+	}
+
+	// Check if operator exists
+	storedOperator, err := repository.GetOperatorByEmail(operator.Email)
+	if err != nil {
+		helpers.SetResponse(w, "Invalid email or password", err, http.StatusUnauthorized)
+		return
+	}
+
+	log.Println(storedOperator)
+
+	// Compare the stored hashed password with the input password
+	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(operator.Password), bcrypt.DefaultCost)
+	log.Printf("Hashed Password: %s", hashedPassword)
+
+	err = bcrypt.CompareHashAndPassword([]byte(storedOperator.Password), []byte(operator.Password))
+	if err != nil {
+		log.Println("error")
+		log.Println(err)
+		helpers.SetResponse(w, "Invalid email or password", err, http.StatusUnauthorized)
+		return
+	}
+
+	// Generate a JWT token
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"email": storedOperator.Email,
+		"id":    storedOperator.ID,
+		"exp":   time.Now().Add(time.Hour * 24).Unix(), // Token expires in 24 hours
+	})
+
+	// Sign the token with the secret key
+	tokenString, err := token.SignedString(jwtSecretKey)
+	if err != nil {
+		helpers.SetResponse(w, "Could not create JWT token", nil, http.StatusInternalServerError)
+		return
+	}
+
+	// Respond with the JWT token
+	helpers.SetResponse(w, "Login successful", map[string]string{"token": tokenString}, http.StatusOK)
+}
 
 // RegisterHandler handles operator registration
 func RegisterHandler(w http.ResponseWriter, r *http.Request) {
@@ -32,13 +90,15 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if operator exists
-	if repository.OperatorExists(operator.Email) {
-		helpers.SetResponse(w, "Operator already exists with this email", nil, http.StatusConflict)
+	if repository.OperatorExists(operator.Email, operator.Phone) {
+		helpers.SetResponse(w, "The email or phone you entered was already registered", nil, http.StatusConflict)
 		return
 	}
 
 	// Hash the password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(operator.Password), bcrypt.DefaultCost)
+	log.Printf("Hashed Password: %s", hashedPassword)
+
 	if err != nil {
 		helpers.SetResponse(w, "Failed to hash password", nil, http.StatusInternalServerError)
 		return
