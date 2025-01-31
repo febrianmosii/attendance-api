@@ -13,7 +13,6 @@ func SetupRoutes() *mux.Router {
 	// Add routes
 	router.HandleFunc("/api/v1/sync/{operatorId}", api.SyncHandler).Methods(http.MethodGet)
 	router.HandleFunc("/api/v1/sync", api.SyncPutHandler).Methods(http.MethodPut)
-	router.HandleFunc("/api/v1/operator/register", api.RegisterHandler).Methods(http.MethodPost)
 	router.HandleFunc("/api/v1/operator/login", api.LoginHandler).Methods(http.MethodPost)
 
 	return router

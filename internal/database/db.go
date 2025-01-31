@@ -15,7 +15,8 @@ var (
 
 // InitializeDB sets up the database connection.
 func InitializeDB() {
-	connStr := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=%s",
+	connStr := fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=%s",
+		os.Getenv("DB_HOST"),
 		os.Getenv("DB_USER"),
 		os.Getenv("DB_PASSWORD"),
 		os.Getenv("DB_NAME"),

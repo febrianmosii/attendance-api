@@ -32,7 +32,7 @@ func SyncHandler(w http.ResponseWriter, r *http.Request) {
 			message = "Operator not found"
 		}
 
-		helpers.SetResponse(w, message, nil, http.StatusNotFound)
+		helpers.SetResponse(w, r, message, nil, http.StatusNotFound)
 		return
 	}
 
@@ -41,22 +41,22 @@ func SyncHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Respond with the fetched data
-	helpers.SetResponse(w, "Request successful", data, http.StatusOK)
+	helpers.SetResponse(w, r, "Request successful", data, http.StatusOK)
 }
 func SyncPutHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse the request payload
-	var payload models.SyncPayload // Use the provided SyncPayload structure
+	var payload models.SyncPayload
 
 	// Decode the JSON payload into the SyncPayload struct
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		helpers.SetResponse(w, "Invalid request payload", nil, http.StatusBadRequest)
+		helpers.SetResponse(w, r, "Invalid request payload", nil, http.StatusBadRequest)
 		log.Println(err)
 		return
 	}
 
 	// Validate the input
 	if len(payload.Data) == 0 {
-		helpers.SetResponse(w, "Invoice codes cannot be empty", nil, http.StatusBadRequest)
+		helpers.SetResponse(w, r, "Invoice codes cannot be empty", nil, http.StatusBadRequest)
 		return
 	}
 
@@ -68,13 +68,14 @@ func SyncPutHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Check if all invoice codes exist in the database
 	exists, err := repository.CheckInvoicesExist(invoiceCodes)
+
 	if err != nil {
-		helpers.SetResponse(w, "Database error", err.Error(), http.StatusInternalServerError)
+		helpers.SetResponse(w, r, "Database error", err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	if !exists {
-		helpers.SetResponse(w, "One or more invoice codes do not exist", nil, http.StatusBadRequest)
+		helpers.SetResponse(w, r, "One or more invoice codes do not exist", nil, http.StatusBadRequest)
 		return
 	}
 
@@ -84,7 +85,7 @@ func SyncPutHandler(w http.ResponseWriter, r *http.Request) {
 		layout := "2006-01-02 15:04:05" // Expected format of time string
 		attendTime, err := time.Parse(layout, item.AttendTime)
 		if err != nil {
-			helpers.SetResponse(w, "Invalid time format for attend_time", nil, http.StatusBadRequest)
+			helpers.SetResponse(w, r, "Invalid time format for attend_time", nil, http.StatusBadRequest)
 			log.Println("Error parsing AttendTime:", err)
 			return
 		}
@@ -97,9 +98,9 @@ func SyncPutHandler(w http.ResponseWriter, r *http.Request) {
 	// Update attendance status
 	if err := repository.UpdateAttendanceStatus(updates, 1); err != nil {
 		log.Println("Error", err)
-		helpers.SetResponse(w, "Failed to update attendance status", nil, http.StatusInternalServerError)
+		helpers.SetResponse(w, r, "Failed to update attendance status", nil, http.StatusInternalServerError)
 		return
 	}
 
-	helpers.SetResponse(w, "Attendance status updated successfully", nil, http.StatusOK)
+	helpers.SetResponse(w, r, "Attendance status updated successfully", nil, http.StatusOK)
 }

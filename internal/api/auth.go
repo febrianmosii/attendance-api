@@ -11,147 +11,106 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/go-playground/validator"
 	"github.com/golang-jwt/jwt"
 	"golang.org/x/crypto/bcrypt"
 )
 
 var jwtSecretKey = []byte(os.Getenv("JWT_SECRET"))
 
-// LoginHandler handles operator login
+var validate = validator.New()
+
+type LoginRequest struct {
+	UserName string  `json:"username" validate:"required,max=255"`
+	Password string  `json:"password" validate:"required,max=255"`
+	DeviceId *string `json:"device_id" validate:"required"`
+}
+
 func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		helpers.SetResponse(w, "Invalid request method", nil, http.StatusBadRequest)
+		helpers.SetResponse(w, r, "Invalid request method", nil, http.StatusBadRequest)
 		return
 	}
 
-	var operator models.Operator
-	if err := json.NewDecoder(r.Body).Decode(&operator); err != nil {
-		helpers.SetResponse(w, "Invalid request body", nil, http.StatusBadRequest)
+	// Decode the JSON request
+	var loginReq LoginRequest
+
+	// Decode JSON and validate fields
+	if err := json.NewDecoder(r.Body).Decode(&loginReq); err != nil {
+		helpers.SetResponse(w, r, "Invalid request body", nil, http.StatusBadRequest)
+		return
+	}
+
+	// Validate the request body
+	validate := validator.New()
+
+	err := validate.Struct(loginReq)
+	if err != nil {
+		helpers.SetResponse(w, r, "Validation Failed", err, http.StatusUnprocessableEntity)
 		return
 	}
 
 	// Check if operator exists
-	storedOperator, err := repository.GetOperatorByEmail(operator.Email)
+	storedOperator, err := repository.GetOperatorByUsername(loginReq.UserName)
+
 	if err != nil {
-		helpers.SetResponse(w, "Invalid email or password", err, http.StatusUnauthorized)
+		log.Printf("Authentication error: %v", err)
+		helpers.SetResponse(w, r, "Invalid username or password", nil, http.StatusUnauthorized)
 		return
 	}
 
-	log.Println(storedOperator)
+	// Compare device id to prevent multi login user
+	print("storedOperator.DeviceId", loginReq.DeviceId)
+
+	if *loginReq.DeviceId != *storedOperator.DeviceId {
+		helpers.SetResponse(w, r, "You have logged in from another device. Please contact the administrator for further assistance.", nil, http.StatusForbidden)
+		return
+	}
 
 	// Compare the stored hashed password with the input password
-	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(operator.Password), bcrypt.DefaultCost)
-	log.Printf("Hashed Password: %s", hashedPassword)
+	err = bcrypt.CompareHashAndPassword([]byte(storedOperator.Password), []byte(loginReq.Password))
 
-	err = bcrypt.CompareHashAndPassword([]byte(storedOperator.Password), []byte(operator.Password))
 	if err != nil {
-		log.Println("error")
-		log.Println(err)
-		helpers.SetResponse(w, "Invalid email or password", err, http.StatusUnauthorized)
+		log.Printf("Password mismatch for username: %s", loginReq.UserName)
+		helpers.SetResponse(w, r, "Invalid username or password", nil, http.StatusUnauthorized)
 		return
 	}
 
 	// Generate a JWT token
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"email": storedOperator.Email,
-		"id":    storedOperator.ID,
-		"exp":   time.Now().Add(time.Hour * 24).Unix(), // Token expires in 24 hours
+		"username": storedOperator.UserName,
+		"id":       storedOperator.ID,
+		"exp":      time.Now().Add(time.Hour * 24).Unix(), // Token expires in 24 hours
 	})
 
-	// Sign the token with the secret key
-	tokenString, err := token.SignedString(jwtSecretKey)
+	jwtSecretKey := os.Getenv("JWT_SECRET_KEY")
+	if jwtSecretKey == "" {
+		log.Fatal("JWT_SECRET_KEY environment variable is not set")
+	}
+
+	tokenString, err := token.SignedString([]byte(jwtSecretKey))
 	if err != nil {
-		helpers.SetResponse(w, "Could not create JWT token", nil, http.StatusInternalServerError)
+		log.Printf("JWT signing error: %v", err)
+		helpers.SetResponse(w, r, "Could not create JWT token", nil, http.StatusInternalServerError)
 		return
 	}
+
+	storedOperator.DeviceId = loginReq.DeviceId
+	storedOperator.DeviceAccessToken = &tokenString
 
 	// Respond with the JWT token
-	helpers.SetResponse(w, "Login successful", map[string]string{"token": tokenString}, http.StatusOK)
-}
+	response := models.LoginResponseData{
+		Token: tokenString,
+		User:  *storedOperator,
+	}
 
-// RegisterHandler handles operator registration
-func RegisterHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		helpers.SetResponse(w, "Invalid request method", nil, http.StatusBadRequest)
+	if err := repository.UpdateOperatorDeviceInformation(storedOperator.DeviceId, storedOperator.DeviceAccessToken, storedOperator.ID); err != nil {
+		log.Println("Error", err)
+		helpers.SetResponse(w, r, "Failed to update device information", nil, http.StatusInternalServerError)
 		return
 	}
 
-	var operator models.Operator
-	if err := json.NewDecoder(r.Body).Decode(&operator); err != nil {
-		helpers.SetResponse(w, "Invalid request body", nil, http.StatusBadRequest)
-		return
-	}
-
-	// Validate the form data
-	errors := validateOperator(operator)
-	if errors != nil {
-		helpers.SetResponse(w, "Validation failed", errors, http.StatusOK)
-		return
-	}
-
-	// Check if operator exists
-	if repository.OperatorExists(operator.Email, operator.Phone) {
-		helpers.SetResponse(w, "The email or phone you entered was already registered", nil, http.StatusConflict)
-		return
-	}
-
-	// Hash the password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(operator.Password), bcrypt.DefaultCost)
-	log.Printf("Hashed Password: %s", hashedPassword)
-
-	if err != nil {
-		helpers.SetResponse(w, "Failed to hash password", nil, http.StatusInternalServerError)
-		return
-	}
-
-	// Insert the operator into the database
-	operatorID, err := repository.InsertOperator(operator.Name, operator.Email, operator.Phone, string(hashedPassword))
-	if err != nil {
-		helpers.SetResponse(w, "Failed to register operator", nil, http.StatusInternalServerError)
-		return
-	}
-
-	// Respond with success
-	operator.ID = operatorID
-	operator.Password = "" // Clear password for the response
-	helpers.SetResponse(w, "Operator registered successfully", operator, http.StatusCreated)
-}
-
-// validateOperator validates operator form data
-func validateOperator(operator models.Operator) *models.RegisterValidationErrors {
-	errors := &models.RegisterValidationErrors{}
-
-	if operator.Name == "" {
-		errors.NameError = "Name is required"
-	}
-
-	if operator.Email == "" {
-		errors.EmailError = "Email is required"
-	} else if !isValidEmail(operator.Email) {
-		errors.EmailError = "Invalid email format"
-	}
-
-	if operator.Phone == "" {
-		errors.PhoneError = "Phone number is required"
-	}
-
-	if operator.Password == "" {
-		errors.PasswordError = "Password is required"
-	} else if len(operator.Password) < 6 || len(operator.Password) > 12 {
-		errors.PasswordError = "Password must be between 6 and 12 characters"
-	}
-
-	if operator.PasswordConfirmation == "" {
-		errors.PasswordConfirmationError = "Password confirmation is required"
-	} else if operator.Password != operator.PasswordConfirmation {
-		errors.PasswordConfirmationError = "Passwords do not match"
-	}
-
-	if errors.NameError != "" || errors.EmailError != "" || errors.PhoneError != "" || errors.PasswordError != "" || errors.PasswordConfirmationError != "" {
-		return errors
-	}
-
-	return nil
+	helpers.SetResponse(w, r, "Login Success!", response, http.StatusOK)
 }
 
 // isValidEmail validates the email format

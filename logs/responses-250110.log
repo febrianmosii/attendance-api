@@ -1,0 +1,2 @@
+RESPONSE_LOG: 2025/01/10 14:30:58 response.go:104: {"response_id":"eda95cbf-eb03-46c2-b67e-6b41fab2c6a4","message":"Attendance status updated successfully","http_code":200}
+RESPONSE_LOG: 2025/01/10 14:34:47 response.go:104: {"response_id":"d2ddeeca-7a9c-4f3c-ad1b-80ce775a7a74","message":"Attendance status updated successfully","http_code":200}

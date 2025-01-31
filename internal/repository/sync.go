@@ -182,10 +182,6 @@ func UpdateAttendanceStatus(data []models.SyncDataUpdate, operatorID int) error 
 	query += `) AS v(attend_time, attend_operator_id, ticket_code)
 	WHERE t.ticket_code = v.ticket_code`
 
-	// Log the query for debugging purposes
-	log.Println("Query:", query)
-	log.Println("Arguments:", args)
-
 	// Execute the query
 	_, err := db.DB.Exec(query, args...)
 	return err
